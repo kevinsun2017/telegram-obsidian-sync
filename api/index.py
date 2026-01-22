@@ -135,11 +135,18 @@ def webhook():
         unique_id = message_id if message_id else now.strftime("%Y%m%d%H%M%S%f")
         note_filename = f"{now.strftime('%Y%m%d-%H%M%S')}-{unique_id}.md"
         note_full_webdav_path = f"{WEBDAV_BASE_PATH}/{note_filename}"
+        
+        # --- 第一步：确保主文件夹存在 ---
+        success_base, err_base = create_webdav_folder_if_not_exists(WEBDAV_BASE_PATH)
+        if not success_base:
+             # 如果是 405 错误，通常意味着文件夹已存在但 client.exists 没判断准，可以尝试继续
+             print(f"Warning: Base folder check/create may have issues: {err_base}")
 
+        # --- 第二步：确保附件文件夹存在 ---
         attachments_webdav_folder = f"{WEBDAV_BASE_PATH}/{OBSIDIAN_ATTACHMENTS_FOLDER}"
-        success, err = create_webdav_folder_if_not_exists(attachments_webdav_folder)
-        if not success:
-             raise Exception(f"创建附件文件夹失败: {err}")
+        success_att, err_att = create_webdav_folder_if_not_exists(attachments_webdav_folder)
+        if not success_att:
+             raise Exception(f"创建附件文件夹失败: {err_att}")
 
         note_content_parts = []
         
