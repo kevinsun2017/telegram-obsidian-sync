@@ -23,9 +23,14 @@ app = Flask(__name__)
 def favicon():
     return '', 204
 
-# --- WebDAV 客户端初始化 (新方式) ---
+# --- WebDAV 客户端初始化 ---
+# 坚果云的地址通常需要包含 /dav/ 前缀
+webdav_url = f"https://{WEBDAV_HOSTNAME}"
+if not webdav_url.endswith('/dav'):
+    webdav_url = webdav_url.rstrip('/') + "/dav"
+
 webdav_client = WebDavClient(
-    base_url=f"https://{WEBDAV_HOSTNAME}",
+    base_url=webdav_url,
     auth=(WEBDAV_USERNAME, WEBDAV_PASSWORD)
 )
 
