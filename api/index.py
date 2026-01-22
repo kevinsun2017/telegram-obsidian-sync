@@ -17,15 +17,10 @@ OBSIDIAN_ATTACHMENTS_FOLDER = "attachments"
 
 app = Flask(__name__)
 
-# --- 新增：处理根路径和 Favicon，避免 Vercel 404 报错 ---
-@app.route('/')
-def index():
-    return "Telegram Obsidian Sync Bot is running!", 200
-
+# --- Favicon 处理，避免 Vercel 404 报错 ---
 @app.route('/favicon.ico')
 @app.route('/favicon.png')
 def favicon():
-    # 返回 204 No Content，告诉浏览器没有图标，且不报错
     return '', 204
 
 # --- WebDAV 客户端初始化 (新方式) ---
@@ -103,13 +98,18 @@ def upload_file_to_webdav(file_content, webdav_full_path):
         return False
 
 # --- 主处理函数 webhook (已更新，包含状态回复) ---
-@app.route('/api/index', methods=['POST'])
+@app.route('/', methods=['GET', 'POST'])
+@app.route('/api/index', methods=['GET', 'POST'])
 def webhook():
-    if request.method != 'POST':
-        abort(400)
+    # --- 新增：处理 GET 请求以便用户在浏览器测试 ---
+    if request.method == 'GET':
+        return "✅ Telegram Obsidian Sync Bot is active. Please use this URL as your Webhook endpoint.", 200
 
-    # 提前获取关键信息，以便在出错时也能回复
+    # 处理 Telegram 的 POST 请求
     update = request.get_json()
+    if not update:
+        return 'no content', 200
+    
     message = update.get('message')
     if not message:
         return 'ok', 200
