@@ -17,6 +17,17 @@ OBSIDIAN_ATTACHMENTS_FOLDER = "attachments"
 
 app = Flask(__name__)
 
+# --- 新增：处理根路径和 Favicon，避免 Vercel 404 报错 ---
+@app.route('/')
+def index():
+    return "Telegram Obsidian Sync Bot is running!", 200
+
+@app.route('/favicon.ico')
+@app.route('/favicon.png')
+def favicon():
+    # 返回 204 No Content，告诉浏览器没有图标，且不报错
+    return '', 204
+
 # --- WebDAV 客户端初始化 (新方式) ---
 webdav_client = WebDavClient(
     base_url=f"https://{WEBDAV_HOSTNAME}",
