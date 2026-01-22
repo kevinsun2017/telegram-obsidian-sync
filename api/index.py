@@ -28,11 +28,14 @@ def favicon():
     return '', 204
 
 # --- WebDAV 客户端初始化 ---
-# 坚果云的地址通常需要包含 /dav/ 前缀
+# 坚果云的地址通常需要包含 /dav/ 前缀，且最好以 / 结尾
 webdav_url = f"https://{WEBDAV_HOSTNAME}"
-if not webdav_url.endswith('/dav'):
-    webdav_url = webdav_url.rstrip('/') + "/dav"
+if "/dav" not in webdav_url:
+    webdav_url = webdav_url.rstrip('/') + "/dav/"
+if not webdav_url.endswith('/'):
+    webdav_url += '/'
 
+print(f"DEBUG: Initializing WebDAV client with URL: {webdav_url}")
 webdav_client = WebDavClient(
     base_url=webdav_url,
     auth=(WEBDAV_USERNAME, WEBDAV_PASSWORD)
@@ -87,14 +90,17 @@ def format_telegram_text_to_markdown(text, entities):
 
 # --- WebDAV 文件操作辅助函数 保持不变 ---
 def create_webdav_folder_if_not_exists(folder_path):
+    print(f"DEBUG: Checking/Creating folder: {folder_path}")
     try:
         if not webdav_client.exists(folder_path):
             webdav_client.mkdir(folder_path)
-            print(f"WebDAV folder created: {folder_path}")
+            print(f"DEBUG: Successfully created folder: {folder_path}")
+        else:
+            print(f"DEBUG: Folder already exists: {folder_path}")
         return True, ""
     except Exception as e:
         error_msg = str(e)
-        print(f"Error checking/creating WebDAV folder {folder_path}: {error_msg}")
+        print(f"DEBUG: Failed operation on {folder_path}. Error: {error_msg}")
         return False, error_msg
 
 def upload_file_to_webdav(file_content, webdav_full_path):
