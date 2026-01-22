@@ -125,7 +125,7 @@ def webhook():
             
             if caption:
                 formatted_caption = format_telegram_text_to_markdown(caption, caption_entities)
-                note_content_parts.append(f"\n{formatted_caption}\n">
+                note_content_parts.append(f"\n{formatted_caption}\n")
 
         elif 'text' in message:
             text_content = message['text']
