@@ -82,10 +82,11 @@ def create_webdav_folder_if_not_exists(folder_path):
         if not webdav_client.exists(folder_path):
             webdav_client.mkdir(folder_path)
             print(f"WebDAV folder created: {folder_path}")
-        return True
+        return True, ""
     except Exception as e:
-        print(f"Error checking/creating WebDAV folder {folder_path}: {e}")
-        return False
+        error_msg = str(e)
+        print(f"Error checking/creating WebDAV folder {folder_path}: {error_msg}")
+        return False, error_msg
 
 def upload_file_to_webdav(file_content, webdav_full_path):
     try:
@@ -131,8 +132,9 @@ def webhook():
         note_full_webdav_path = f"{WEBDAV_BASE_PATH}/{note_filename}"
 
         attachments_webdav_folder = f"{WEBDAV_BASE_PATH}/{OBSIDIAN_ATTACHMENTS_FOLDER}"
-        if not create_webdav_folder_if_not_exists(attachments_webdav_folder):
-             raise Exception("创建附件文件夹失败")
+        success, err = create_webdav_folder_if_not_exists(attachments_webdav_folder)
+        if not success:
+             raise Exception(f"创建附件文件夹失败: {err}")
 
         note_content_parts = []
         
