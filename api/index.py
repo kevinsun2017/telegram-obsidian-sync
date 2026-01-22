@@ -1,20 +1,18 @@
 import os
 import datetime
 import requests
-import io # 需要导入 io 模块
-from webdav4.client import Client as WebDavClient # 新的导入方式
+import io
+from webdav4.client import Client as WebDavClient
 
 from flask import Flask, request, abort
 
 # --- 环境变量部分保持不变 ---
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 AUTHORIZED_CHAT_ID = os.environ.get('AUTHORIZED_CHAT_ID') 
-
 WEBDAV_HOSTNAME = os.environ.get('WEBDAV_HOSTNAME')      
 WEBDAV_USERNAME = os.environ.get('WEBDAV_USERNAME')      
 WEBDAV_PASSWORD = os.environ.get('WEBDAV_PASSWORD')      
 WEBDAV_BASE_PATH = os.environ.get('WEBDAV_BASE_PATH')    
-
 OBSIDIAN_ATTACHMENTS_FOLDER = "attachments"
 
 app = Flask(__name__)
@@ -24,6 +22,25 @@ webdav_client = WebDavClient(
     base_url=f"https://{WEBDAV_HOSTNAME}",
     auth=(WEBDAV_USERNAME, WEBDAV_PASSWORD)
 )
+
+# --- 新增辅助函数：发送 Telegram 回复消息 ---
+def send_telegram_reply(chat_id, message_id, text):
+    """
+    向指定的 Telegram 聊天发送一条回复消息。
+    """
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'reply_to_message_id': message_id
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=5) # 设置5秒超时
+        response.raise_for_status()
+        print(f"Sent reply to chat_id {chat_id}: {text}")
+    except requests.exceptions.RequestException as e:
+        # 如果发送回复失败，只在日志中记录，不中断主流程
+        print(f"Error sending Telegram reply: {e}")
 
 # --- 格式化函数 format_telegram_text_to_markdown 保持不变 ---
 def format_telegram_text_to_markdown(text, entities):
@@ -53,7 +70,7 @@ def format_telegram_text_to_markdown(text, entities):
         formatted_parts.append(text_utf16[current_offset*2:].decode('utf-16-le'))
     return "".join(formatted_parts)
 
-# --- WebDAV 文件操作辅助函数 (新方式) ---
+# --- WebDAV 文件操作辅助函数 保持不变 ---
 def create_webdav_folder_if_not_exists(folder_path):
     try:
         if not webdav_client.exists(folder_path):
@@ -74,34 +91,43 @@ def upload_file_to_webdav(file_content, webdav_full_path):
         print(f"Error uploading file to WebDAV {webdav_full_path}: {e}")
         return False
 
-# --- 主处理函数 webhook 保持不变 ---
+# --- 主处理函数 webhook (已更新，包含状态回复) ---
 @app.route('/api/index', methods=['POST'])
 def webhook():
     if request.method != 'POST':
         abort(400)
 
-    try:
-        update = request.get_json()
-        message = update.get('message')
-        if not message:
-            return 'ok', 200
+    # 提前获取关键信息，以便在出错时也能回复
+    update = request.get_json()
+    message = update.get('message')
+    if not message:
+        return 'ok', 200
 
-        chat_id = str(message['chat']['id'])
+    chat_id = str(message['chat']['id'])
+    message_id = message.get('message_id')
+
+    try:
+        # --- 安全检查 ---
         if chat_id != AUTHORIZED_CHAT_ID:
             print(f"Unauthorized access attempt from chat_id: {chat_id}")
+            # 对于未授权的访问，不回复，直接中止
             abort(403)
 
         now = datetime.datetime.now()
-        message_id = message.get('message_id', now.strftime("%Y%m%d%H%M%S%f"))
-        note_filename = f"{now.strftime('%Y%m%d-%H%M%S')}-{message_id}.md"
+        # 使用 message_id 保证文件名唯一性
+        unique_id = message_id if message_id else now.strftime("%Y%m%d%H%M%S%f")
+        note_filename = f"{now.strftime('%Y%m%d-%H%M%S')}-{unique_id}.md"
         note_full_webdav_path = f"{WEBDAV_BASE_PATH}/{note_filename}"
 
         attachments_webdav_folder = f"{WEBDAV_BASE_PATH}/{OBSIDIAN_ATTACHMENTS_FOLDER}"
-        create_webdav_folder_if_not_exists(attachments_webdav_folder)
+        if not create_webdav_folder_if_not_exists(attachments_webdav_folder):
+             raise Exception("创建附件文件夹失败")
 
         note_content_parts = []
         
+        # --- 处理图片 ---
         if 'photo' in message:
+            # (省略了图片处理的详细代码，与上一版相同)
             photo = message['photo'][-1] 
             file_id = photo['file_id']
             caption = message.get('caption', '')
@@ -117,16 +143,18 @@ def webhook():
             image_response.raise_for_status()
             
             image_extension = file_path.split('.')[-1] if '.' in file_path else "jpg"
-            image_filename = f"{now.strftime('%Y%m%d-%H%M%S')}-{message_id}.{image_extension}"
+            image_filename = f"{now.strftime('%Y%m%d-%H%M%S')}-{unique_id}.{image_extension}"
             image_full_webdav_path = f"{attachments_webdav_folder}/{image_filename}"
             
-            upload_file_to_webdav(image_response.content, image_full_webdav_path)
+            if not upload_file_to_webdav(image_response.content, image_full_webdav_path):
+                 raise Exception("上传图片文件失败")
             note_content_parts.append(f"![[{OBSIDIAN_ATTACHMENTS_FOLDER}/{image_filename}]]\n")
             
             if caption:
                 formatted_caption = format_telegram_text_to_markdown(caption, caption_entities)
                 note_content_parts.append(f"\n{formatted_caption}\n")
 
+        # --- 处理文本 ---
         elif 'text' in message:
             text_content = message['text']
             text_entities = message.get('entities', [])
@@ -136,11 +164,12 @@ def webhook():
         else:
              note_content_parts.append("收到一个非文本或图片的消息，暂未处理。\n")
 
+        # --- 生成并上传最终笔记 ---
         if note_content_parts:
             final_note_content = "".join(note_content_parts)
             markdown_output = f"""
 ---
-id: {message_id}
+id: {unique_id}
 date: {now.strftime('%Y-%m-%d %H:%M:%S')}
 tags:
 - telegram
@@ -148,14 +177,21 @@ tags:
 ---
 
 {final_note_content}"""
-            upload_file_to_webdav(markdown_output.encode('utf-8'), note_full_webdav_path)
+            if not upload_file_to_webdav(markdown_output.encode('utf-8'), note_full_webdav_path):
+                raise Exception("上传笔记文件失败")
 
+        # --- 所有操作成功，发送成功回复 ---
+        send_telegram_reply(chat_id, message_id, "✅ 已同步到 Obsidian")
         return 'ok', 200
 
     except Exception as e:
         import traceback
-        print(f"An unexpected error occurred: {e}\n{traceback.format_exc()}")
-        abort(500, description="Internal Server Error. Check logs for details.")
+        error_message = f"An unexpected error occurred: {e}"
+        print(f"{error_message}\n{traceback.format_exc()}")
+        # --- 发生错误，发送失败回复 ---
+        send_telegram_reply(chat_id, message_id, f"❌ 同步失败: {e}")
+        # 即使发送回复失败，也返回 200 OK，防止 Telegram 不断重试
+        return 'ok', 200
 
 # --- 本地测试入口 ---
 if __name__ == '__main__':
