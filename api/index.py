@@ -144,19 +144,38 @@ def webhook():
         # 使用 message_id 保证文件名唯一性
         unique_id = message_id if message_id else now.strftime("%Y%m%d%H%M%S%f")
         note_filename = f"{now.strftime('%Y%m%d-%H%M%S')}-{unique_id}.md"
-        note_full_webdav_path = f"{WEBDAV_BASE_PATH}/{note_filename}"
-        
         # --- 第一步：确保主文件夹存在 ---
-        success_base, err_base = create_webdav_folder_if_not_exists(WEBDAV_BASE_PATH)
-        if not success_base:
-             # 如果是 405 错误，通常意味着文件夹已存在但 client.exists 没判断准，可以尝试继续
-             print(f"Warning: Base folder check/create may have issues: {err_base}")
+        # 坚果云技巧：如果是应用授权，路径可能是 /应用/文件夹名
+        paths_to_try = [WEBDAV_BASE_PATH]
+        if not WEBDAV_BASE_PATH.startswith('/应用/'):
+             paths_to_try.append(f"/应用{WEBDAV_BASE_PATH}")
 
+        success_base = False
+        last_err = ""
+        current_base = WEBDAV_BASE_PATH
+
+        for p in paths_to_try:
+            print(f"DEBUG: Trying base path: {p}")
+            ok, err = create_webdav_folder_if_not_exists(p)
+            if ok:
+                success_base = True
+                current_base = p
+                break
+            last_err = err
+
+        if not success_base:
+             print(f"Warning: Base folder check/create failed: {last_err}")
+             # 如果基础目录都进不去，后面肯定报 403，这里直接抛出更易读的错误
+             if "403" in last_err:
+                 raise Exception(f"403 权限错误：请检查坚果云应用密码是否为“全量授权”。如果是“应用授权”，请确保文件夹在“应用”目录下。")
+        
         # --- 第二步：确保附件文件夹存在 ---
-        attachments_webdav_folder = f"{WEBDAV_BASE_PATH}/{OBSIDIAN_ATTACHMENTS_FOLDER}"
+        attachments_webdav_folder = f"{current_base}/{OBSIDIAN_ATTACHMENTS_FOLDER}"
         success_att, err_att = create_webdav_folder_if_not_exists(attachments_webdav_folder)
         if not success_att:
              raise Exception(f"创建附件文件夹失败: {err_att}")
+
+        note_full_webdav_path = f"{current_base}/{note_filename}"
 
         note_content_parts = []
         
