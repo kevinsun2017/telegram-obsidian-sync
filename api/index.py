@@ -8,12 +8,16 @@ from flask import Flask, request, abort
 
 # --- 环境变量部分保持不变 ---
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-AUTHORIZED_CHAT_ID = os.environ.get('AUTHORIZED_CHAT_ID') 
-WEBDAV_HOSTNAME = os.environ.get('WEBDAV_HOSTNAME')      
-WEBDAV_USERNAME = os.environ.get('WEBDAV_USERNAME')      
-WEBDAV_PASSWORD = os.environ.get('WEBDAV_PASSWORD')      
-WEBDAV_BASE_PATH = os.environ.get('WEBDAV_BASE_PATH')    
-OBSIDIAN_ATTACHMENTS_FOLDER = "attachments"
+AUTHORIZED_CHAT_ID = int(os.environ.get('AUTHORIZED_CHAT_ID', 0))
+WEBDAV_HOSTNAME = os.environ.get('WEBDAV_HOSTNAME')
+WEBDAV_USERNAME = os.environ.get('WEBDAV_USERNAME')
+WEBDAV_PASSWORD = os.environ.get('WEBDAV_PASSWORD')
+# 确保基础路径以 / 开头且不以 / 结尾
+WEBDAV_BASE_PATH = os.environ.get('WEBDAV_BASE_PATH', '/').rstrip('/')
+if not WEBDAV_BASE_PATH.startswith('/'):
+    WEBDAV_BASE_PATH = '/' + WEBDAV_BASE_PATH
+
+OBSIDIAN_ATTACHMENTS_FOLDER = os.environ.get('OBSIDIAN_ATTACHMENTS_FOLDER', 'attachments')
 
 app = Flask(__name__)
 
