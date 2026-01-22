@@ -1,102 +1,62 @@
 import os
 import datetime
 import requests
-import webdav.client as wc
-import json 
+import io # 需要导入 io 模块
+from webdav4.client import Client as WebDavClient # 新的导入方式
 
 from flask import Flask, request, abort
 
-# --- 从环境变量读取敏感信息 ---
+# --- 环境变量部分保持不变 ---
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 AUTHORIZED_CHAT_ID = os.environ.get('AUTHORIZED_CHAT_ID') 
 
-# 坚果云 WebDAV 配置
 WEBDAV_HOSTNAME = os.environ.get('WEBDAV_HOSTNAME')      
 WEBDAV_USERNAME = os.environ.get('WEBDAV_USERNAME')      
 WEBDAV_PASSWORD = os.environ.get('WEBDAV_PASSWORD')      
 WEBDAV_BASE_PATH = os.environ.get('WEBDAV_BASE_PATH')    
 
-# Obsidian 附件文件夹名 (相对于 WEBDAV_BASE_PATH)
 OBSIDIAN_ATTACHMENTS_FOLDER = "attachments"
 
 app = Flask(__name__)
 
-# --- WebDAV 客户端初始化 ---
-webdav_client = wc.Client({
-    'webdav_hostname': f"https://{WEBDAV_HOSTNAME}",
-    'webdav_login': WEBDAV_USERNAME,
-    'webdav_password': WEBDAV_PASSWORD
-})
+# --- WebDAV 客户端初始化 (新方式) ---
+webdav_client = WebDavClient(
+    base_url=f"https://{WEBDAV_HOSTNAME}",
+    auth=(WEBDAV_USERNAME, WEBDAV_PASSWORD)
+)
 
-# --- 辅助函数：将 Telegram entities 转换为 Markdown ---
+# --- 格式化函数 format_telegram_text_to_markdown 保持不变 ---
 def format_telegram_text_to_markdown(text, entities):
-    """
-    将 Telegram 消息文本和 entities 转换为 Obsidian 兼容的 Markdown 格式。
-    """
-    if not text:
-        return ""
-    if not entities:
-        return text
-    
+    if not text: return ""
+    if not entities: return text
     entities.sort(key=lambda x: x['offset'])
-
     formatted_parts = []
     current_offset = 0
-
-    # 将文本转换为UTF-16码元列表，以便正确处理offset和length
     text_utf16 = text.encode('utf-16-le')
-
     for entity in entities:
-        offset = entity['offset']
-        length = entity['length']
-        entity_type = entity['type']
-
-        # 添加实体前的普通文本
+        offset, length, entity_type = entity['offset'], entity['length'], entity['type']
         if offset > current_offset:
             formatted_parts.append(text_utf16[current_offset*2 : offset*2].decode('utf-16-le'))
-
-        # 提取实体文本
         entity_text = text_utf16[offset*2 : (offset + length)*2].decode('utf-16-le')
-        
-        # 应用Markdown格式
-        if entity_type == 'bold':
-            formatted_parts.append(f"**{entity_text}**")
-        elif entity_type == 'italic':
-            formatted_parts.append(f"*{entity_text}*")
-        elif entity_type == 'code':
-            formatted_parts.append(f"`{entity_text}`")
-        elif entity_type == 'pre': 
-            lang = entity.get('language', '')
-            formatted_parts.append(f"```{lang}\n{entity_text}\n```")
-        elif entity_type == 'text_link': 
-            url = entity.get('url', '#')
-            formatted_parts.append(f"[{entity_text}]({url})")
-        elif entity_type == 'url': 
-            formatted_parts.append(f"<{entity_text}>")
-        elif entity_type == 'strikethrough':
-            formatted_parts.append(f"~~{entity_text}~~")
-        elif entity_type == 'underline':
-            formatted_parts.append(f"<ins>{entity_text}</ins>")
-        elif entity_type == 'spoiler':
-             formatted_parts.append(f"||{entity_text}||")
-        else:
-            formatted_parts.append(entity_text)
-        
+        if entity_type == 'bold': formatted_parts.append(f"**{entity_text}**")
+        elif entity_type == 'italic': formatted_parts.append(f"*{entity_text}*")
+        elif entity_type == 'code': formatted_parts.append(f"`{entity_text}`")
+        elif entity_type == 'pre': formatted_parts.append(f"```{{entity.get('language', '')}}\n{{entity_text}}\n```")
+        elif entity_type == 'text_link': formatted_parts.append(f"[{{entity_text}}]({{entity.get('url', '#')}})")
+        elif entity_type == 'url': formatted_parts.append(f"<{{entity_text}}>")
+        elif entity_type == 'strikethrough': formatted_parts.append(f"~~{{entity_text}}~~")
+        elif entity_type == 'underline': formatted_parts.append(f"<ins>{{entity_text}}</ins>")
+        elif entity_type == 'spoiler': formatted_parts.append(f"||{{entity_text}}||")
+        else: formatted_parts.append(entity_text)
         current_offset = offset + length
-
-    # 添加最后一个实体后的普通文本
     if current_offset*2 < len(text_utf16):
         formatted_parts.append(text_utf16[current_offset*2:].decode('utf-16-le'))
-
     return "".join(formatted_parts)
 
-# --- WebDAV 文件操作辅助函数 ---
+# --- WebDAV 文件操作辅助函数 (新方式) ---
 def create_webdav_folder_if_not_exists(folder_path):
-    """
-    在 WebDAV 服务器上创建文件夹，如果它不存在的话。
-    """
     try:
-        if not webdav_client.check(folder_path):
+        if not webdav_client.exists(folder_path):
             webdav_client.mkdir(folder_path)
             print(f"WebDAV folder created: {folder_path}")
         return True
@@ -105,18 +65,16 @@ def create_webdav_folder_if_not_exists(folder_path):
         return False
 
 def upload_file_to_webdav(file_content, webdav_full_path):
-    """
-    将文件内容上传到 WebDAV 服务器。
-    """
     try:
-        webdav_client.upload_to(remote_path=webdav_full_path, data=file_content, overwrite=True)
+        file_obj = io.BytesIO(file_content)
+        webdav_client.upload_fileobj(file_obj, webdav_full_path, overwrite=True)
         print(f"File uploaded to WebDAV: {webdav_full_path}")
         return True
     except Exception as e:
         print(f"Error uploading file to WebDAV {webdav_full_path}: {e}")
         return False
 
-# --- Telegram Bot Webhook 主处理函数 ---
+# --- 主处理函数 webhook 保持不变 ---
 @app.route('/api/index', methods=['POST'])
 def webhook():
     if request.method != 'POST':
@@ -143,7 +101,6 @@ def webhook():
 
         note_content_parts = []
         
-        # --- 处理图片 ---
         if 'photo' in message:
             photo = message['photo'][-1] 
             file_id = photo['file_id']
@@ -168,23 +125,21 @@ def webhook():
             
             if caption:
                 formatted_caption = format_telegram_text_to_markdown(caption, caption_entities)
-                note_content_parts.append(f"\n{formatted_caption}\n")
+                note_content_parts.append(f"\n{formatted_caption}\n">
 
-        # --- 处理文本 ---
         elif 'text' in message:
             text_content = message['text']
             text_entities = message.get('entities', [])
             formatted_text = format_telegram_text_to_markdown(text_content, text_entities)
             note_content_parts.append(f"{formatted_text}\n")
         
-        # --- 处理其他类型 (简化) ---
         else:
              note_content_parts.append("收到一个非文本或图片的消息，暂未处理。\n")
 
-        # --- 生成并上传最终笔记 ---
         if note_content_parts:
             final_note_content = "".join(note_content_parts)
-            markdown_output = f"""---
+            markdown_output = f"""
+---
 id: {message_id}
 date: {now.strftime('%Y-%m-%d %H:%M:%S')}
 tags:
@@ -203,15 +158,7 @@ tags:
         abort(500, description="Internal Server Error. Check logs for details.")
 
 # --- 本地测试入口 ---
-# 仅用于本地开发和测试，Vercel 部署时不会运行此段
 if __name__ == '__main__':
-    # 💡 提示：本地测试时，你可以创建一个 .env 文件，在其中定义所有环境变量，
-    # 并使用 python-dotenv 库来加载它们。
-    
-    # from dotenv import load_dotenv
-    # load_dotenv() # 加载 .env 文件中的变量
-    
-    # ⚠️ 确保所有环境变量都已设置，否则会报错
     if not all([TELEGRAM_BOT_TOKEN, AUTHORIZED_CHAT_ID, WEBDAV_HOSTNAME, WEBDAV_USERNAME, WEBDAV_PASSWORD, WEBDAV_BASE_PATH]):
         print("Error: Missing one or more required environment variables for local testing.")
         print("Please set TELEGRAM_BOT_TOKEN, AUTHORIZED_CHAT_ID, WEBDAV_HOSTNAME, WEBDAV_USERNAME, WEBDAV_PASSWORD, WEBDAV_BASE_PATH.")
